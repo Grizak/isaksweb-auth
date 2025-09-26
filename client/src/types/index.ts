@@ -1,6 +1,6 @@
-export interface Page {
-  url: string;
-  linkTitle: string;
-  isFirstElement?: boolean;
-  element: React.ReactNode;
+export interface BackendMetadataResponse {
+  title: string;
+  metadata: {
+    [key: string]: string;
+  };
 }
