@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "scripts": {
+    "dev": "concurrently \"cd server && pnpm dev\" \"cd client && pnpm dev\"",
+    "build:client": "cd client && pnpm build",
+    "build:backend": "cd server && pnpm build",
+    "build": "pnpm build:client && pnpm build:backend"
+  }
+}
