@@ -21,3 +21,4 @@ server/frontend
 
 # Environment variables
 .env*
+!.env.example
