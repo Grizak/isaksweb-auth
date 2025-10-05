@@ -1,0 +1,8 @@
+{
+  "/login": {
+    "title": "Sign In - Isaksweb Auth"
+  },
+  "/register": {
+    "title": "Sign Up - Isaksweb Auth"
+  }
+}
