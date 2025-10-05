@@ -22,3 +22,6 @@ server/frontend
 # Environment variables
 .env*
 !.env.example
+
+# Test files
+test.html
