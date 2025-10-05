@@ -1,12 +1,5 @@
 import { parentPort as exportParentPort } from "worker_threads";
-import { sendEmail } from "@/utils/mailer";
-
-interface SendEmailMessage {
-  to: string;
-  subject: string;
-  messageText: string;
-  messageHTML: string;
-}
+import { sendEmail } from "./utils/mailer.js";
 
 if (!exportParentPort) {
   console.error(
@@ -17,7 +10,7 @@ if (!exportParentPort) {
 
 const parentPort = exportParentPort;
 
-parentPort.on("message", async (message: SendEmailMessage) => {
+parentPort.on("message", async (message) => {
   const { to, subject, messageText, messageHTML } = message;
   try {
     const response = await sendEmail({

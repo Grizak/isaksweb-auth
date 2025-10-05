@@ -1,21 +1,6 @@
 import nodemailer from "nodemailer";
 
-interface EmailOptions {
-  to: string;
-  subject: string;
-  text?: string;
-  html?: string;
-}
-
-interface EmailResponse {
-  success: boolean;
-  messageId?: string;
-  error?: string;
-}
-
-export const sendEmail = async (
-  options: EmailOptions
-): Promise<EmailResponse> => {
+export const sendEmail = async (options) => {
   try {
     // Validate required environment variables
     const email = process.env.EMAIL;

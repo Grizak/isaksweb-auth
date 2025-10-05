@@ -1,19 +1,8 @@
 import { Worker } from "worker_threads";
 import path from "path";
 
-const isDevelopment = process.env.NODE_ENV !== "production";
-
 const createWorker = (fileName: string) => {
-  if (isDevelopment) {
-    // Development: use tsx to run TypeScript directly
-    return new Worker("tsx", {
-      argv: [path.resolve(`./src/workers/${fileName}.ts`)],
-      execArgv: [],
-    });
-  } else {
-    // Production: use compiled JavaScript
-    return new Worker(path.resolve(`./dist/workers/${fileName}.cjs`));
-  }
+  return new Worker(path.resolve(`./src/workers/${fileName}.js`));
 };
 
 // Function to create a worker based on the environment
