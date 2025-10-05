@@ -64,4 +64,8 @@ export default {
     minimizer: [new TerserPlugin()],
   },
   mode: "production",
+  // External packages
+  externals: {
+    express: "commonjs express",
+  },
 };
