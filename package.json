@@ -6,6 +6,7 @@
     "dev": "concurrently \"cd server && pnpm dev\" \"cd client && pnpm dev\"",
     "build:client": "cd client && pnpm build",
     "build:backend": "cd server && pnpm build",
-    "build": "pnpm build:client && pnpm build:backend"
+    "build": "pnpm build:client && pnpm build:backend",
+    "start": "pnpm --filter server start"
   }
 }
