@@ -2,16 +2,16 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/bundle.cjs",
   "scripts": {
-    "dev": "nodemon --exec tsx src/index.ts --watch src --ext ts,js",
+    "dev": "nodemon --exec tsx src/index.ts --watch src --watch config/routeData.json --ext js,ts,json",
     "build": "webpack && rimraf frontend",
-    "start": "node dist/bundle.js"
+    "start": "node dist/bundle.cjs"
   },
   "keywords": [],
   "author": "",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@10.15.1",
+  "packageManager": "pnpm@10.17.1",
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.3",
