@@ -38,8 +38,16 @@ mongoose
 app.use(express.static("frontend"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.set("trust proxy", true);
 
-app.use("/api", (await import("./routes/api")).default);
+app.use((req, res, next) => {
+  logger.debug!(
+    `Received request to ${req.url} with body: ${req.body} from ${req.ip}`
+  );
+  next();
+});
+
+app.use("/api", (await import("@/routes/api")).default);
 
 app.use((req, res) => {
   res.sendFile("frontend/index.html", { root: process.cwd() });
@@ -51,7 +59,7 @@ const server = app.listen(PORT, () => {
 
 process.on("SIGINT", async () => {
   logger.warn!("Shutting down gracefully");
-  mongoose.disconnect();
+  await mongoose.disconnect();
   server.close();
   await shutDownWorkers();
   process.exit(0);
