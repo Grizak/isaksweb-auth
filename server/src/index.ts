@@ -50,7 +50,7 @@ app.use((req, res, next) => {
 app.use("/api", (await import("@/routes/api")).default);
 
 app.use((req, res) => {
-  res.sendFile("frontend/index.html", { root: process.cwd() });
+  res.sendFile("frontend/index.html");
 });
 
 const server = app.listen(PORT, () => {

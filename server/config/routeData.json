@@ -4,5 +4,8 @@
   },
   "/register": {
     "title": "Sign Up - Isaksweb Auth"
+  },
+  "/": {
+    "title": "Home - Isaksweb Auth"
   }
 }
