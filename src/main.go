@@ -23,6 +23,8 @@ func main() {
 	// Public routes
 	r.POST("/register", handlers.Register(cfg))
 	r.POST("/oauth/token", handlers.Token(cfg))
+	r.POST("/oauth/refresh", handlers.Refresh(cfg))
+	r.POST("/oauth/revoke", handlers.Revoke(cfg))
 
 	// Protected routes
 	auth := r.Group("/", middleware.RequireAuth(cfg))

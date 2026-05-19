@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// POST /register
 func Register(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
@@ -44,6 +45,7 @@ func Register(cfg config.Config) gin.HandlerFunc {
 	}
 }
 
+// POST /oauth/token
 func Token(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
@@ -98,8 +100,131 @@ func Token(cfg config.Config) gin.HandlerFunc {
 			"access_token":  accessToken,
 			"refresh_token": refreshToken,
 			"token_type":    "Bearer",
-			"expires_in":    15 * time.Minute,
+			"expires_in":    900,
 		})
+	}
+}
+
+// POST /oauth/refresh
+func Refresh(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			RefreshToken string `json:"refresh_token" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// 1. Verify the JWT signature is valid
+		token, err := jwt.ParseWithClaims(body.RefreshToken, &Claims{}, func(t *jwt.Token) (any, error) {
+			return []byte(cfg.JWTSecret), nil
+		})
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+			return
+		}
+
+		claims, ok := token.Claims.(*Claims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
+			return
+		}
+
+		// 2. Check it exists in SQLite and isn't revoked
+		var revoked int
+		var expiresAt time.Time
+		err = store.DB.QueryRow(`SELECT revoked, expires_at FROM refresh_tokens WHERE token = ?`, body.RefreshToken).Scan(&revoked, &expiresAt)
+
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token not found"})
+			return
+		}
+		if revoked == 1 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token revoked"})
+			return
+		}
+		if time.Now().After(expiresAt) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token expired"})
+			return
+		}
+
+		userID := claims.Subject
+		email := claims.Email
+
+		// 3. Rotate - revoke old, issue new refresh token
+		_, err = store.DB.Exec(
+			`UPDATE refresh_tokens SET revoked = 1 WHERE TOKEN = ?`,
+			body.RefreshToken,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not revoke token"})
+			return
+		}
+
+		newRefresh, err := signJWT(userID, email, cfg.JWTSecret, 7*24*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue refresh token"})
+		}
+		store.DB.Exec(
+			`INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
+			newRefresh, userID, time.Now().Add(7*24*time.Hour),
+		)
+
+		// 4. Issue new access token
+		newAccess, err := signJWT(userID, email, cfg.JWTSecret, 15*time.Minute)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue access token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"access_token":  newAccess,
+			"refresh_token": newRefresh,
+			"token_type":    "Bearer",
+			"expires_in":    900,
+		})
+	}
+}
+
+// POST /oauth/revoke
+func Revoke(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			RefreshToken string `json:"refresh_token" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Verify the JWT is at least structurally valid before revoking
+		_, err := jwt.ParseWithClaims(body.RefreshToken, &Claims{}, func(t *jwt.Token) (any, error) {
+			return []byte(cfg.JWTSecret), nil
+		})
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+
+		result, err := store.DB.Exec(
+			`UPDATE refresh_tokens SET revoked = 1 WHERE token = ? AND revoked = 0`,
+			body.RefreshToken,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not revoke refresh token"})
+			return
+		}
+
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			// Already revoked or never existed -- still return 200
+			// Don't leak whether the token existed at all
+			c.JSON(http.StatusOK, gin.H{"message": "token revoked"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "token revoked"})
 	}
 }
 
