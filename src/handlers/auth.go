@@ -268,6 +268,50 @@ func RegisterClient(cfg config.Config) gin.HandlerFunc {
 	}
 }
 
+// GET /oauth/authorize?client_id=...&redirect_uri=...&state=...
+func Authorize(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientID := c.Query("client_id")
+		redirectURI := c.Query("redirect_uri")
+		state := c.Query("state") // opaque value, echoed back to client
+
+		if clientID == "" || redirectURI == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing client_id or redirect_uri"})
+			return
+		}
+
+		// Validate client exists and redirect_uri matches
+		var storedRedirect string
+		err := store.DB.QueryRow(
+			`SELECT redirect_uri FROM client WHERE id = ?`, clientID,
+		).Scan(&storedRedirect)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unknown client"})
+			return
+		}
+		if storedRedirect != redirectURI {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "redirect_uri missmatch"})
+			return
+		}
+
+		// Serve a minimal login form - in production this would be a real HTML page
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, `
+			<html><body>
+			<h2>Login</h2>
+			<form method="POST" action="/oauth/authorize">
+				<input type="hidden" name="client_id" value="`+clientID+`" />
+				<input type="hidden" name="redirect_uri" value="`+redirectURI+`" />
+				<input type="hidden" name="state" value="`+state+`" />
+				<input type="email" name="email" placeholder="Email" required />
+				<input type="password" name="password" placeholder="Password" required />
+				<button type="submit">Authorize</button>
+			</form>
+			</body></html>
+		`)
+	}
+}
+
 // --- Helpers ---
 
 type Claims struct {
