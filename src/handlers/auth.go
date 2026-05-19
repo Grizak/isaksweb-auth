@@ -228,6 +228,46 @@ func Revoke(cfg config.Config) gin.HandlerFunc {
 	}
 }
 
+// POST /clients
+func RegisterClient(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Name        string `json:"name" binding:"required"`
+			RedirectURI string `json:"redirect_uri" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		clientID := uuid.NewString()
+		clientSecret := uuid.NewString() // Raw - shown once, never again
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(clientSecret), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not hash secret"})
+			return
+		}
+
+		_, err = store.DB.Exec(
+			`INSERT INTO clients (id, secret, name, redirect_uri) VALUES (?, ?, ?, ?)`,
+			clientID, string(hash), body.Name, body.RedirectURI,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create client"})
+			return
+		}
+
+		// Return the raw secret once -- it cannot be recovered after this
+		c.JSON(http.StatusCreated, gin.H{
+			"client_id":     clientID,
+			"client_secret": clientSecret,
+			"name":          body.Name,
+			"redirect_uri":  body.RedirectURI,
+		})
+	}
+}
+
 // --- Helpers ---
 
 type Claims struct {
