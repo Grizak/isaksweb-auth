@@ -312,6 +312,55 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 	}
 }
 
+// POST /oauth/authorize - form submission
+func AuthorizeSubmit(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientID := c.PostForm("client_id")
+		redirectURI := c.PostForm("redirect_uri")
+		state := c.PostForm("state")
+		email := c.PostForm("email")
+		password := c.PostForm("password")
+
+		// Re-validate client
+		var storedRedirect string
+		err := store.DB.QueryRow(
+			`SELECT redirect_uri FROM clients WHERE id = ?`, clientID,
+		).Scan(&storedRedirect)
+		if err == sql.ErrNoRows || storedRedirect != redirectURI {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid client"})
+			return
+		}
+
+		// Verify user credentials
+		var userID, hashed string
+		err = store.DB.QueryRow(
+			`SELECT id, password FROM users WHERE email = ?`, email,
+		).Scan(&userID, &hashed)
+		if err == sql.ErrNoRows {
+			c.Redirect(http.StatusFound, redirectURI+"?error=access_denied&state="+state)
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password)); err != nil {
+			c.Redirect(http.StatusFound, redirectURI+"?error=access_denied&state="+state)
+			return
+		}
+
+		// Issue a short-lived authorization code (10 min)
+		code := uuid.NewString()
+		_, err = store.DB.Exec(
+			`INSERT INTO authorization_codes (code, user_id, client_id, expires_at) VALUES (?, ?, ?, ?)`,
+			code, userID, clientID, time.Now().Add(10*time.Minute),
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue code"})
+			return
+		}
+
+		// Redirect back the client app with the code
+		c.Redirect(http.StatusFound, redirectURI+"?code="+code+"&state="+state)
+	}
+}
+
 // --- Helpers ---
 
 type Claims struct {
