@@ -9,6 +9,7 @@ import (
 	"github.com/Grizak/isaksweb-auth/src/middleware"
 	"github.com/Grizak/isaksweb-auth/src/store"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -23,14 +24,20 @@ func main() {
 	r := gin.Default()
 	r.SetTrustedProxies(nil)
 
+	// 5 reqs/min, burst of 5 - strict for auth endpoints
+	authLimiter := middleware.NewRateLimiter(rate.Every(1*time.Minute/5), 5)
+
+	// 30 reqs/min, burst of 10 - relaxed for general endpoints
+	generalLimiter := middleware.NewRateLimiter(rate.Every(time.Minute/30), 10)
+
 	// Public routes
-	r.POST("/register", handlers.Register(cfg))
-	r.POST("/oauth/token", handlers.Token(cfg))
-	r.POST("/oauth/refresh", handlers.Refresh(cfg))
-	r.POST("/oauth/revoke", handlers.Revoke(cfg))
-	r.POST("/clients", handlers.RegisterClient(cfg))
-	r.GET("/oauth/authorize", handlers.Authorize(cfg))
-	r.POST("/oauth/authorize", handlers.AuthorizeSubmit(cfg))
+	r.POST("/register", authLimiter.Middleware(), handlers.Register(cfg))
+	r.POST("/oauth/token", generalLimiter.Middleware(), handlers.Token(cfg))
+	r.POST("/oauth/refresh", generalLimiter.Middleware(), handlers.Refresh(cfg))
+	r.POST("/oauth/revoke", authLimiter.Middleware(), handlers.Revoke(cfg))
+	r.POST("/clients", authLimiter.Middleware(), handlers.RegisterClient(cfg))
+	r.GET("/oauth/authorize", authLimiter.Middleware(), handlers.Authorize(cfg))
+	r.POST("/oauth/authorize", generalLimiter.Middleware(), handlers.AuthorizeSubmit(cfg))
 
 	// Protected routes
 	auth := r.Group("/", middleware.RequireAuth(cfg))
