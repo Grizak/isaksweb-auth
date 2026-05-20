@@ -50,58 +50,136 @@ func Token(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
 			GrantType string `json:"grant_type" binding:"required"`
-			Email     string `json:"email"`
-			Password  string `json:"password"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		if body.GrantType != "password" {
+		if body.GrantType == "password" {
+			var passBody struct {
+				Email    string `json:"email"`
+				Password string `json:"password"`
+			}
+			if err := c.ShouldBindJSON(&passBody); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// 1. Look up the user
+			var id, hashed string
+			err := store.DB.QueryRow(
+				`SELECT id, password FROM users WHERE email = ?`, passBody.Email,
+			).Scan(&id, &hashed)
+			if err == sql.ErrNoRows {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+
+			// 2. Verify password
+			if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(passBody.Password)); err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				return
+			}
+
+			// 3. Issue access token (15 min)
+			accessToken, err := signJWT(id, passBody.Email, cfg.JWTSecret, 15*time.Minute)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
+				return
+			}
+
+			// 4. Issue + store refresh token (7 days)
+			refreshToken, err := signJWT(id, passBody.Email, cfg.JWTSecret, 7*24*time.Hour)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue refresh token"})
+			}
+			store.DB.Exec(
+				`INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
+				refreshToken, id, time.Now().Add(7*24*time.Hour),
+			)
+
+			c.JSON(http.StatusOK, gin.H{
+				"access_token":  accessToken,
+				"refresh_token": refreshToken,
+				"token_type":    "Bearer",
+				"expires_in":    900,
+			})
+		} else if body.GrantType == "authorization_code" {
+			var codeBody struct {
+				Code         string `json:"code" binding:"required"`
+				ClientID     string `json:"client_id" binding:"required"`
+				ClientSecret string `json:"client_secret" binding:"required"`
+				RedirectURI  string `json:"redirect_uri" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&codeBody); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// Validate client credentials
+			var storedSecret, storedRedirect string
+			err := store.DB.QueryRow(
+				`SELECT secret, redirect_uri FROM clients WHERE id = ?`, codeBody.ClientID,
+			).Scan(&storedSecret, &storedRedirect)
+			if err == sql.ErrNoRows {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unknown client"})
+				return
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(storedSecret), []byte(codeBody.ClientSecret)); err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid client secret"})
+				return
+			}
+			if storedRedirect != codeBody.RedirectURI {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri mismatch"})
+				return
+			}
+
+			// Validate the code
+			var userID string
+			var expiresAt time.Time
+			var used int
+			err = store.DB.QueryRow(
+				`SELECT user_id, expires_at, used FROM authorization_codes WHERE code = ? AND client_id = ?`,
+				codeBody.Code, codeBody.ClientID,
+			).Scan(&userID, &expiresAt, &used)
+			if err == sql.ErrNoRows {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid code"})
+				return
+			}
+			if used == 1 {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "code already used"})
+				return
+			}
+			if time.Now().After(expiresAt) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "code expired"})
+				return
+			}
+
+			// Mark code as used - one time only
+			store.DB.Exec(`UPDATE authorization_codes SET used = 1 WHERE code = ?`, codeBody.Code)
+
+			// Fetch email for jwt claims
+			var email string
+			store.DB.QueryRow(`SELECT email FROM users WHERE id = ?`, userID).Scan(&email)
+
+			// Issue tokens
+			accessToken, _ := signJWT(userID, email, cfg.JWTSecret, 15*time.Minute)
+			refreshToken, _ := signJWT(userID, email, cfg.JWTSecret, 6*24*time.Hour)
+			store.DB.Exec(
+				`INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
+				refreshToken, userID, time.Now().Add(7*24*time.Hour),
+			)
+
+			c.JSON(http.StatusOK, gin.H{
+				"access_token":  accessToken,
+				"refresh_token": refreshToken,
+				"token_type":    "Bearer",
+				"expires_in":    900,
+			})
+		} else {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported grant_type"})
-			return
 		}
-
-		// 1. Look up the user
-		var id, hashed string
-		err := store.DB.QueryRow(
-			`SELECT id, password FROM users WHERE email = ?`, body.Email,
-		).Scan(&id, &hashed)
-		if err == sql.ErrNoRows {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-			return
-		}
-
-		// 2. Verify password
-		if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(body.Password)); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-			return
-		}
-
-		// 3. Issue access token (15 min)
-		accessToken, err := signJWT(id, body.Email, cfg.JWTSecret, 15*time.Minute)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
-			return
-		}
-
-		// 4. Issue + store refresh token (7 days)
-		refreshToken, err := signJWT(id, body.Email, cfg.JWTSecret, 7*24*time.Hour)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue refresh token"})
-		}
-		store.DB.Exec(
-			`INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES (?, ?, ?)`,
-			refreshToken, id, time.Now().Add(7*24*time.Hour),
-		)
-
-		c.JSON(http.StatusOK, gin.H{
-			"access_token":  accessToken,
-			"refresh_token": refreshToken,
-			"token_type":    "Bearer",
-			"expires_in":    900,
-		})
 	}
 }
 
