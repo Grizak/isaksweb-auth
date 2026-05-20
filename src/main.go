@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/Grizak/isaksweb-auth/src/config"
 	"github.com/Grizak/isaksweb-auth/src/handlers"
@@ -16,6 +17,8 @@ func main() {
 	if err := store.Init(cfg.DBPath); err != nil {
 		log.Fatalf("failed to init db: %v", err)
 	}
+
+	store.StartGC(1 * time.Hour) // Runs ever hour
 
 	r := gin.Default()
 	r.SetTrustedProxies(nil)
