@@ -49,7 +49,13 @@ func Register(cfg config.Config) gin.HandlerFunc {
 func Token(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			GrantType string `json:"grant_type" binding:"required"`
+			GrantType    string `json:"grant_type" binding:"required"`
+			Email        string `json:"email"`
+			Password     string `json:"password"`
+			Code         string `json:"code"`
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+			RedirectURI  string `json:"redirect_uri"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -57,19 +63,10 @@ func Token(cfg config.Config) gin.HandlerFunc {
 		}
 
 		if body.GrantType == "password" {
-			var passBody struct {
-				Email    string `json:"email"`
-				Password string `json:"password"`
-			}
-			if err := c.ShouldBindJSON(&passBody); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
 			// 1. Look up the user
 			var id, hashed string
 			err := store.DB.QueryRow(
-				`SELECT id, password FROM users WHERE email = ?`, passBody.Email,
+				`SELECT id, password FROM users WHERE email = ?`, body.Email,
 			).Scan(&id, &hashed)
 			if err == sql.ErrNoRows {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
@@ -77,20 +74,20 @@ func Token(cfg config.Config) gin.HandlerFunc {
 			}
 
 			// 2. Verify password
-			if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(passBody.Password)); err != nil {
+			if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(body.Password)); err != nil {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 				return
 			}
 
 			// 3. Issue access token (15 min)
-			accessToken, err := signJWT(id, passBody.Email, cfg.JWTSecret, 15*time.Minute)
+			accessToken, err := signJWT(id, body.Email, cfg.JWTSecret, 15*time.Minute)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
 				return
 			}
 
 			// 4. Issue + store refresh token (7 days)
-			refreshToken, err := signJWT(id, passBody.Email, cfg.JWTSecret, 7*24*time.Hour)
+			refreshToken, err := signJWT(id, body.Email, cfg.JWTSecret, 7*24*time.Hour)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue refresh token"})
 			}
@@ -106,31 +103,20 @@ func Token(cfg config.Config) gin.HandlerFunc {
 				"expires_in":    900,
 			})
 		} else if body.GrantType == "authorization_code" {
-			var codeBody struct {
-				Code         string `json:"code" binding:"required"`
-				ClientID     string `json:"client_id" binding:"required"`
-				ClientSecret string `json:"client_secret" binding:"required"`
-				RedirectURI  string `json:"redirect_uri" binding:"required"`
-			}
-			if err := c.ShouldBindJSON(&codeBody); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
 			// Validate client credentials
 			var storedSecret, storedRedirect string
 			err := store.DB.QueryRow(
-				`SELECT secret, redirect_uri FROM clients WHERE id = ?`, codeBody.ClientID,
+				`SELECT secret, redirect_uri FROM clients WHERE id = ?`, body.ClientID,
 			).Scan(&storedSecret, &storedRedirect)
 			if err == sql.ErrNoRows {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "unknown client"})
 				return
 			}
-			if err := bcrypt.CompareHashAndPassword([]byte(storedSecret), []byte(codeBody.ClientSecret)); err != nil {
+			if err := bcrypt.CompareHashAndPassword([]byte(storedSecret), []byte(body.ClientSecret)); err != nil {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid client secret"})
 				return
 			}
-			if storedRedirect != codeBody.RedirectURI {
+			if storedRedirect != body.RedirectURI {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri mismatch"})
 				return
 			}
@@ -141,7 +127,7 @@ func Token(cfg config.Config) gin.HandlerFunc {
 			var used int
 			err = store.DB.QueryRow(
 				`SELECT user_id, expires_at, used FROM authorization_codes WHERE code = ? AND client_id = ?`,
-				codeBody.Code, codeBody.ClientID,
+				body.Code, body.ClientID,
 			).Scan(&userID, &expiresAt, &used)
 			if err == sql.ErrNoRows {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid code"})
@@ -157,7 +143,7 @@ func Token(cfg config.Config) gin.HandlerFunc {
 			}
 
 			// Mark code as used - one time only
-			store.DB.Exec(`UPDATE authorization_codes SET used = 1 WHERE code = ?`, codeBody.Code)
+			store.DB.Exec(`UPDATE authorization_codes SET used = 1 WHERE code = ?`, body.Code)
 
 			// Fetch email for jwt claims
 			var email string
@@ -361,14 +347,14 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 		// Validate client exists and redirect_uri matches
 		var storedRedirect string
 		err := store.DB.QueryRow(
-			`SELECT redirect_uri FROM client WHERE id = ?`, clientID,
+			`SELECT redirect_uri FROM clients WHERE id = ?`, clientID,
 		).Scan(&storedRedirect)
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unknown client"})
 			return
 		}
 		if storedRedirect != redirectURI {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "redirect_uri missmatch"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_uri mismatch"})
 			return
 		}
 
