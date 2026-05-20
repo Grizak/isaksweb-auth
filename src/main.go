@@ -25,6 +25,9 @@ func main() {
 	r.POST("/oauth/token", handlers.Token(cfg))
 	r.POST("/oauth/refresh", handlers.Refresh(cfg))
 	r.POST("/oauth/revoke", handlers.Revoke(cfg))
+	r.POST("/clients", handlers.RegisterClient(cfg))
+	r.GET("/oauth/authorize", handlers.Authorize(cfg))
+	r.POST("/oauth/authorize", handlers.AuthorizeSubmit(cfg))
 
 	// Protected routes
 	auth := r.Group("/", middleware.RequireAuth(cfg))
