@@ -366,6 +366,8 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 			return
 		}
 
+		email := c.Query("email") // will be empty on first visit
+
 		// Serve a minimal login form - in production this would be a real HTML page
 		c.Header("Content-Type", "text/html")
 		c.String(http.StatusOK, `
@@ -376,7 +378,7 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 				<input type="hidden" name="redirect_uri" value="`+redirectURI+`" />
 				<input type="hidden" name="state" value="`+state+`" />
 				<input type="hidden" name="_csrf" value="`+csrfToken+`" \>
-				<input type="email" name="email" placeholder="Email" required />
+				<input type="email" name="email" value="`+email+`" placeholder="Email" required />
 				<input type="password" name="password" placeholder="Password" required />
 				<button type="submit">Authorize</button>
 			</form>
