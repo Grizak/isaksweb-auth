@@ -10,7 +10,7 @@ all:
 dev:
 	go run $(SOURCES)
 
-prod: all
+prod:
 	GIN_MODE=release $(TARGET)
 
 clean:
