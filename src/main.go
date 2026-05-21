@@ -37,7 +37,11 @@ func main() {
 	r.POST("/oauth/revoke", authLimiter.Middleware(), handlers.Revoke(cfg))
 	r.POST("/clients", authLimiter.Middleware(), handlers.RegisterClient(cfg))
 	r.GET("/oauth/authorize", authLimiter.Middleware(), handlers.Authorize(cfg))
-	r.POST("/oauth/authorize", generalLimiter.Middleware(), handlers.AuthorizeSubmit(cfg))
+	r.POST("/oauth/authorize",
+		generalLimiter.Middleware(),
+		middleware.ValidateCSRF(),
+		handlers.AuthorizeSubmit(cfg),
+	)
 
 	// Protected routes
 	auth := r.Group("/", middleware.RequireAuth(cfg))

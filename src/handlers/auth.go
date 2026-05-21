@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Grizak/isaksweb-auth/src/config"
+	"github.com/Grizak/isaksweb-auth/src/middleware"
 	"github.com/Grizak/isaksweb-auth/src/store"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -358,6 +359,13 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 			return
 		}
 
+		// Generate CSRF token and set cookie
+		csrfToken, err := middleware.SetCSRFToken(c)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not generate CSRF token"})
+			return
+		}
+
 		// Serve a minimal login form - in production this would be a real HTML page
 		c.Header("Content-Type", "text/html")
 		c.String(http.StatusOK, `
@@ -367,6 +375,7 @@ func Authorize(cfg config.Config) gin.HandlerFunc {
 				<input type="hidden" name="client_id" value="`+clientID+`" />
 				<input type="hidden" name="redirect_uri" value="`+redirectURI+`" />
 				<input type="hidden" name="state" value="`+state+`" />
+				<input type="hidden" name="_csrf" value="`+csrfToken+`" \>
 				<input type="email" name="email" placeholder="Email" required />
 				<input type="password" name="password" placeholder="Password" required />
 				<button type="submit">Authorize</button>
